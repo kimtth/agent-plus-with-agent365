@@ -108,8 +108,8 @@ a365 config display -g           # verify final config
 | Identity / app  | How it appears  | When it appears  | Why it exists |
 |---|---|---|---|
 | **Agent 365 Tools** resource app      | Often visible as `Work IQ Tools` in Enterprise applications              | Before MCP permissions can be granted. You create it once per tenant if it is not already present. | Shared MCP resource app used by an A365 admin to grant MCP permissions and consent to the blueprint                                        |
-| **`a365demo Blueprint`**              | App registration + enterprise application for the blueprint              | During `a365 setup blueprint` or `a365 setup all`                                                  | This is the blueprint definition for your agent. It is the object published in the manifest and later configured in Teams Developer Portal |
-| **`a365demo Identity`**               | Agent identity / agent user template identity derived from the blueprint | After the blueprint exists and the agent identity is created as part of setup/onboarding           | This is the runtime identity used for routing, bot auth, governance, and inherited tool access for the actual agent instance               |
+| **`a365demo Blueprint`**              | Bot-style app registration + enterprise application for the blueprint    | During `a365 setup blueprint` or `a365 setup all`                                                  | This is the blueprint definition for your agent. It is the object published in the manifest, later configured in Teams Developer Portal, and it carries the delegated API permissions, including `Work IQ Tools` / `Agent 365 Tools` delegated consent |
+| **`a365demo Identity`**               | Agent identity / agent user template identity (`ServiceIdentity`) derived from the blueprint | After the blueprint exists and the agent identity is created as part of setup/onboarding           | This is the runtime agent user identity used for routing, bot auth, governance, and tool execution context for the actual agent instance   |
 | **Microsoft 365 publish backend app** | Microsoft-owned first-party enterprise application                       | Only during `a365 publish`; not created by this repo                                               | Required for Microsoft 365 publish-side operations; if missing, publish can fail with `invalid_client`                                     |
 
 - Agent 365 Tools → Created via `.\scripts\New-Agent365ToolsServicePrincipalProdPublic.ps1`
@@ -120,12 +120,20 @@ a365 config display -g           # verify final config
 In short:  
 
 - `Work IQ Tools` is the shared MCP resource app, and an A365 admin uses it to grant MCP permissions and consent to the blueprint.
-- `a365demo Blueprint` is your tenant's blueprint app created by `a365 setup blueprint`.
-- `a365demo Identity` is the agent identity created from that blueprint and used by the running agent.
+- `a365demo Blueprint` is your tenant's bot-style blueprint app created by `a365 setup blueprint`, and it is the app that holds delegated API permissions such as `Work IQ Tools` delegated scopes.
+- `a365demo Identity` is the runtime agent user / `ServiceIdentity` created from that blueprint and used by the running agent.
 
 `a365demo` in this README is a sample, user-defined naming prefix from this repo's configuration. It is not a reserved Agent 365 platform name. You can replace it with a project-specific name in your own `a365.config.json`, and the generated blueprint, identity, UPN, and web app names will follow that choice.
 
 So the usual order is: create or verify `Work IQ Tools` -> run `a365 setup blueprint` to create `a365demo Blueprint` -> create the agent identity (`a365demo Identity`) -> use Agent 365 Tools to grant MCP permissions and consent to the blueprint -> publish.
+
+<p align="center">
+   <a href="docs/a365demo-blueprint-api-permissions.png">
+      <img src="docs/a365demo-blueprint-api-permissions.png" alt="a365demo Blueprint API permissions showing Work IQ Tools delegated permissions" width="1100" />
+   </a>
+</p>
+
+<p align="center"><em>Example: the <b>blueprint</b> app carries delegated API permissions to Work IQ Tools.</em></p>
 
 <details>
 <summary>To verify they were created:</summary>
@@ -335,10 +343,10 @@ graph TD
     B2 -->|5. Deliver activity with agent identity context| C1
     C1 -->|6. Invoke agent logic| C
     
-    %% Identity roles:
-    %%   a365demo Blueprint = who requests the token
-    %%   Work IQ Tools      = what the token is for
-    %%   a365demo Identity  = which agent `instance` is acting
+   %% Identity roles:
+   %%   a365demo Blueprint = the bot app that requests the token and holds delegated API permissions
+   %%   Work IQ Tools      = the MCP resource app the delegated permission targets
+   %%   a365demo Identity  = the runtime agent user / service identity that is acting
 
     %% Downstream auth and tool execution
     E1 -->|Blueprint app and enterprise app are registered in Entra| E
@@ -364,16 +372,16 @@ Agent 365 is built on the Bot Framework lineage and deploys as an **Azure App Se
 
 In this flow, the three important identity objects appear at different stages:
 
-- `a365demo Blueprint` is created during setup, published in the app package, and later used by the runtime to acquire downstream app tokens from Entra.
-- `a365demo Identity` is the agent instance identity selected by the Agent 365 control plane, and that identity context is carried into routing, governance, and MCP execution.
+- `a365demo Blueprint` is created during setup, published in the app package, and later used by the runtime to acquire downstream app tokens from Entra. This is the bot-style app registration that carries delegated API permissions, including `Work IQ Tools` delegated scopes.
+- `a365demo Identity` is the agent user / `ServiceIdentity` selected by the Agent 365 control plane, and that identity context is carried into routing, governance, and MCP execution.
 - `Agent 365 Tools` (often shown as `Work IQ Tools` in Enterprise Applications) is the shared tenant MCP resource app. It is not the external caller itself; it is the resource/scope target used when the runtime requests tokens and when MCP-backed tool permissions are evaluated.
 
 **Three auth layers:**
 
 | Layer | Purpose | Proves |
 |---|---|---|
-| **Blueprint app / service principal** (Entra ID) | App registration, enterprise app presence, MSAL token acquisition, and Microsoft 365 API permissions | *"this blueprint app is allowed"* |
-| **Agent identity** (A365 runtime identity derived from the blueprint) | Governance, routing, lifecycle, bot auth, and execution as the actual agent instance | *"this agent instance is allowed to do this"* |
+| **Blueprint app / service principal** (Entra ID) | App registration, enterprise app presence, MSAL token acquisition, bot-style app identity, and delegated Microsoft 365 / `Work IQ Tools` API permissions | *"this blueprint app is allowed"* |
+| **Agent identity** (A365 runtime identity derived from the blueprint) | Governance, routing, lifecycle, bot auth, and execution as the actual runtime agent user / service identity | *"this agent instance is allowed to do this"* |
 | **MCP authorization boundary** | Per-tool access control for MCP servers such as Mail or Excel | Requires **both** the blueprint app permissions and the agent identity context |
 
 Multi-channel: Teams, Copilot Studio, Webchat, and third-party channels.
